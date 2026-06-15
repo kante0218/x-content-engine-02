@@ -1,0 +1,55 @@
+name: auto-post
+
+# わかな(@wakana_emeta) 自動投稿。Macが動いていなくてもGitHubのクラウドで実行する。
+# 投稿時刻(JST 08:00 / 12:30 / 17:00 / 21:00)を UTC に変換して指定。
+# cron は UTC。GitHub Actions のcronは数分〜十数分遅延することがある(許容)。
+on:
+  schedule:
+    - cron: "0 23 * * *"    # 08:00 JST
+    - cron: "30 3 * * *"    # 12:30 JST
+    - cron: "0 8 * * *"     # 17:00 JST
+    - cron: "0 12 * * *"    # 21:00 JST
+  workflow_dispatch:        # 手動テスト用
+
+concurrency:
+  group: auto-post          # 多重起動による二重投稿を防止
+  cancel-in-progress: false
+
+permissions:
+  contents: write           # テーマ履歴(recent_themes.json)を commit back するため
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: pip install anthropic python-dotenv requests-oauthlib requests
+
+      - name: Generate & post
+        env:
+          X_CONSUMER_KEY: ${{ secrets.X_CONSUMER_KEY }}
+          X_CONSUMER_SECRET: ${{ secrets.X_CONSUMER_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          X_LIVE_POST: "true"
+        run: python scripts/pipeline.py
+
+      - name: Persist theme rotation state
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A logs/recent_themes.json drafts/posted 2>/dev/null || true
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: persist post state [skip ci]"
+            git push
+          else
+            echo "no state change to commit"
+          fi
