@@ -7,7 +7,7 @@ on:
   schedule:
     - cron: "0 23 * * *"    # 08:00 JST
     - cron: "30 3 * * *"    # 12:30 JST
-    - cron: "0 8 * * *"     # 17:00 JST
+    - cron: "0 8 * * *"    # 17:00 JST
     - cron: "0 12 * * *"    # 21:00 JST
   workflow_dispatch:        # 手動テスト用
     inputs:
