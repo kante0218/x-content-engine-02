@@ -32,6 +32,7 @@ from polish_draft import (  # noqa: E402
     build_emoji_hint,
     record_used_emojis,
 )
+from config import enabled_themes, fetch_post_config  # noqa: E402
 
 STATE = ROOT / "logs" / "recent_themes.json"
 RECENT_KEEP = 6  # 直近6テーマは避ける
@@ -56,6 +57,22 @@ DEFAULT_WEIGHT = 3
 HINTS = dict(THEME_BANK)
 
 
+def _active_bank() -> list[tuple[str, str, float]]:
+    """(key, hint, weight) のリスト。ダッシュボード設定があればそれを、無ければ組み込み値を使う。"""
+    cfg = fetch_post_config()
+    themes = enabled_themes(cfg)
+    if themes:
+        bank = [
+            (str(t["key"]), str(t.get("label", "")).strip(), float(t.get("weight", 1)))
+            for t in themes
+            if str(t.get("key", "")).strip() and str(t.get("label", "")).strip()
+        ]
+        if bank:
+            sys.stderr.write(f"[config] テーマをダッシュボード設定から取得: {len(bank)}件\n")
+            return bank
+    return [(k, h, float(THEME_WEIGHTS.get(k, DEFAULT_WEIGHT))) for k, h in THEME_BANK]
+
+
 def _load_recent() -> list[str]:
     if STATE.exists():
         try:
@@ -70,19 +87,21 @@ def _save_recent(recent: list[str]) -> None:
     STATE.write_text(json.dumps(recent[-RECENT_KEEP:], ensure_ascii=False), encoding="utf-8")
 
 
-def pick_theme() -> str:
+def pick_theme(bank: list[tuple[str, str, float]]) -> tuple[str, str]:
+    """重み付きでテーマを選ぶ。(key, hint) を返す。直近テーマは避ける。"""
     recent = _load_recent()
-    candidates = [(k, w) for k, w in ((key, THEME_WEIGHTS.get(key, DEFAULT_WEIGHT)) for key, _ in THEME_BANK) if k not in recent]
+    hints = {k: h for k, h, _ in bank}
+    candidates = [(k, w) for k, _, w in bank if k not in recent]
     if not candidates:
-        candidates = [(key, THEME_WEIGHTS.get(key, DEFAULT_WEIGHT)) for key, _ in THEME_BANK]
+        candidates = [(k, w) for k, _, w in bank]
     keys = [k for k, _ in candidates]
     weights = [w for _, w in candidates]
     chosen = random.choices(keys, weights=weights, k=1)[0]
     _save_recent(recent + [chosen])
-    return chosen
+    return chosen, hints[chosen]
 
 
-def _call(theme_key: str, length: str | None) -> str:
+def _call(hint: str, length: str | None) -> str:
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
         raise RuntimeError(".env に ANTHROPIC_API_KEY が未設定")
@@ -92,7 +111,7 @@ def _call(theme_key: str, length: str | None) -> str:
         "あなた(わかな)として、Xに投稿する新しいツイートを1つ書いてください。\n"
         "過去の投稿の焼き直しにならないよう、今日ふと感じたことのように、具体的なエピソードや切り口で。\n"
         "宣伝・募集の押し売りにはせず、自然な独り言や気づきのトーンで。\n\n"
-        f"テーマ: {HINTS[theme_key]}\n\n"
+        f"テーマ: {hint}\n\n"
         f"{length_instruction}\n\n"
         f"{emoji_hint}"
     )
@@ -108,10 +127,11 @@ def _call(theme_key: str, length: str | None) -> str:
 
 def generate(length: str | None = None) -> tuple[str, str]:
     """(theme_key, tweet_text) を返す。上限超なら1回だけ短めで再生成。"""
-    theme_key = pick_theme()
-    text = _call(theme_key, length)
+    bank = _active_bank()
+    theme_key, hint = pick_theme(bank)
+    text = _call(hint, length)
     if len(text) > MAX_CHARS:
-        text = _call(theme_key, "中文")
+        text = _call(hint, "中文")
     if len(text) > MAX_CHARS:
         raise RuntimeError(f"生成結果が{len(text)}文字>{MAX_CHARS}。テーマ={theme_key}")
     record_used_emojis(text)

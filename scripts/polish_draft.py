@@ -171,13 +171,31 @@ LENGTH_MODES = [
 LENGTH_LABELS = {m[1]: m for m in LENGTH_MODES}
 
 
+# 設定キー(short/medium/long) ↔ ラベル(短文/中文/長文)
+_LEN_KEY_TO_LABEL = {"short": "短文", "medium": "中文", "long": "長文"}
+
+
+def _config_length_weights() -> list[float] | None:
+    """ダッシュボード設定の文章量比率を LENGTH_MODES の並び順で返す。無ければ None。"""
+    try:
+        from config import fetch_post_config, length_weights  # 遅延import(失敗しても無視)
+
+        lw = length_weights(fetch_post_config())
+    except Exception:
+        return None
+    if not lw:
+        return None
+    label_to_w = {_LEN_KEY_TO_LABEL[k]: v for k, v in lw.items()}
+    return [label_to_w.get(label, 0.0) for _, label, _ in LENGTH_MODES]
+
+
 def _pick_length_instruction(forced: str | None = None) -> tuple[str, str]:
     if forced:
         mode = LENGTH_LABELS.get(forced)
         if not mode:
             raise ValueError(f"length は {list(LENGTH_LABELS)} のいずれか")
         return mode[1], mode[2]
-    weights = [w for w, _, _ in LENGTH_MODES]
+    weights = _config_length_weights() or [w for w, _, _ in LENGTH_MODES]
     choice = random.choices(LENGTH_MODES, weights=weights, k=1)[0]
     return choice[1], choice[2]
 
