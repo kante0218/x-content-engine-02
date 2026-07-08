@@ -140,10 +140,20 @@ def main() -> int:
     try:
         result = post(text, quote_tweet_id=quote_id)
     except Exception as e:
+        msg = str(e)
+        m = re.search(r"status=(\d+)", msg)
+        code = int(m.group(1)) if m else None
+        # 402(クレジット枯渇)/429(レート制限)/5xx(一時的サーバ障害)は、手動ドラフトを
+        # failed に捨てず pending に温存し、赤ランにもせず soft skip(exit 0)。
+        # クレジット復活後の次回スケジュール実行で自動リトライされ、投稿が失われない。
+        if code in {402, 429, 500, 502, 503, 504} or "CreditsDepleted" in msg:
+            append_log(source_label, {"event": "post_deferred", "status": code, "error": msg, "generated": is_generated})
+            print(f"[post DEFERRED status={code}] 一時的エラー。次回リトライ: {msg}", file=sys.stderr)
+            return 0
         if draft_path is not None:
             FAILED.mkdir(exist_ok=True)
             shutil.move(str(draft_path), str(FAILED / draft_path.name))
-        append_log(source_label, {"event": "post_failed", "error": str(e), "text": text, "generated": is_generated})
+        append_log(source_label, {"event": "post_failed", "error": msg, "text": text, "generated": is_generated})
         print(f"[post ERROR] {e}", file=sys.stderr)
         return 1
 
