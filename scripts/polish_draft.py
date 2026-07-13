@@ -13,7 +13,7 @@ import random
 import sys
 from pathlib import Path
 
-from anthropic import Anthropic
+from llm_gemini import Anthropic
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -214,9 +214,9 @@ def polish(draft: str, length: str | None = None) -> str:
     draft = draft.strip()
     if not draft:
         raise ValueError("空のドラフトは推敲できません")
-    api_key = os.getenv("ANTHROPIC_API_KEY")
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
-        raise RuntimeError(".env に ANTHROPIC_API_KEY が未設定")
+        raise RuntimeError("GEMINI_API_KEY が未設定(https://aistudio.google.com/apikey で無料発行)")
 
     label, length_instruction = _pick_length_instruction(length)
     emoji_hint = build_emoji_hint()
