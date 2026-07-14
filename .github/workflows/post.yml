@@ -21,6 +21,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  issues: write            # 失敗時にIssueで通知するため
   contents: write           # テーマ履歴(recent_themes.json)を commit back するため
 
 jobs:
@@ -60,4 +61,18 @@ jobs:
             git push
           else
             echo "no state change to commit"
+          fi
+      - name: Alert on failure (GitHub Issue)
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          existing=$(gh issue list --repo "${{ github.repository }}" --state open --search "auto-post failed in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "${{ github.repository }}" --body "再失敗: $url"
+          else
+            gh issue create --repo "${{ github.repository }}" \
+              --title "🚨 auto-post failed" \
+              --body "自動投稿ワークフローが失敗しました。放置すると投稿が止まります。ログ: $url"
           fi
