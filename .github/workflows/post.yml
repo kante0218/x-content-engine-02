@@ -48,6 +48,7 @@ jobs:
           DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
           SYNC_SECRET: ${{ secrets.SYNC_SECRET }}
           X_LIVE_POST: ${{ github.event.inputs.dry_run == 'true' && 'false' || 'true' }}
+          X_REPLY_THREAD_RATE: ${{ vars.X_REPLY_THREAD_RATE || '0.3' }}
         run: python scripts/pipeline.py
 
       - name: Persist theme rotation state

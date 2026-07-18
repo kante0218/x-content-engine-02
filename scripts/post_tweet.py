@@ -23,7 +23,7 @@ TWEETS_ENDPOINT = "https://api.x.com/2/tweets"
 MAX_CHARS = 1000
 
 
-def post(text: str, quote_tweet_id: str | None = None) -> dict:
+def post(text: str, quote_tweet_id: str | None = None, in_reply_to_tweet_id: str | None = None) -> dict:
     text = text.strip()
     if not text:
         raise ValueError("空の投稿は送れません")
@@ -49,6 +49,8 @@ def post(text: str, quote_tweet_id: str | None = None) -> dict:
     payload: dict = {"text": text}
     if quote_tweet_id:
         payload["quote_tweet_id"] = quote_tweet_id
+    if in_reply_to_tweet_id:
+        payload["reply"] = {"in_reply_to_tweet_id": in_reply_to_tweet_id}
     res = session.post(TWEETS_ENDPOINT, json=payload, timeout=30)
     if res.status_code != 201:
         raise RuntimeError(f"X API エラー status={res.status_code} body={res.text}")

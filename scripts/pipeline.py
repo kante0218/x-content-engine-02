@@ -19,6 +19,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import random
 import re
 import shutil
 import sys
@@ -31,8 +32,17 @@ load_dotenv(ROOT / ".env")
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from generate_draft import generate  # noqa: E402
-from polish_draft import polish  # noqa: E402
+from polish_draft import generate_reply, polish  # noqa: E402
 from post_tweet import post  # noqa: E402
+
+
+def _reply_thread_rate() -> float:
+    """自己リプ(コメ欄に続き)を付ける確率。0〜1。既定0.3。"""
+    try:
+        r = float(os.getenv("X_REPLY_THREAD_RATE", "0.3"))
+    except ValueError:
+        return 0.3
+    return min(max(r, 0.0), 1.0)
 
 PENDING = ROOT / "drafts" / "pending"
 POSTED = ROOT / "drafts" / "posted"
@@ -88,6 +98,8 @@ def main() -> int:
     quote_id: str | None = None
     source_label: str  # ログ・ファイル名用
     is_generated: bool
+    thread = False  # コメ欄に『続き』を自己リプで置くスレッド投稿にするか
+    reply_text: str | None = None
 
     if draft_path is not None:
         is_generated = False
@@ -104,14 +116,36 @@ def main() -> int:
             return 1
         if quote_id:
             print(f"[quote_rt] quote_tweet_id={quote_id}")
+        # コメ欄に『続き』を置くスレッド投稿にするか(引用RTとは併用しない)
+        thread = (quote_id is None) and (random.random() < _reply_thread_rate())
         try:
-            text = polish(body, length=length)
+            text = polish(body, length=length, comment_cta=thread)
         except Exception as e:
             FAILED.mkdir(exist_ok=True)
             shutil.move(str(draft_path), str(FAILED / draft_path.name))
             append_log(draft_path.name, {"event": "polish_failed", "error": str(e)})
             print(f"[polish ERROR] {e}", file=sys.stderr)
             return 1
+        # スレッド投稿: コメ欄に置くリプ本文を"投稿前に"生成する。
+        # 失敗したら、本文だけが「コメ欄に続き」を約束する宙ぶらりんを避けるため
+        # comment_cta なしで推敲し直し、単発投稿に落とす。
+        if thread:
+            try:
+                reply_text = generate_reply(text, body)
+                print(f"[reply] ({len(reply_text)}文字)\n---\n{reply_text}\n---")
+            except Exception as e:
+                print(f"[reply gen failed → 単発に切替] {e}", file=sys.stderr)
+                append_log(draft_path.name, {"event": "reply_gen_failed", "error": str(e)})
+                thread = False
+                reply_text = None
+                try:
+                    text = polish(body, length=length)
+                except Exception as e2:
+                    FAILED.mkdir(exist_ok=True)
+                    shutil.move(str(draft_path), str(FAILED / draft_path.name))
+                    append_log(draft_path.name, {"event": "polish_failed", "error": str(e2)})
+                    print(f"[polish ERROR] {e2}", file=sys.stderr)
+                    return 1
     else:
         if no_generate:
             append_log("(none)", {"event": "no_pending_skip"})
@@ -132,7 +166,7 @@ def main() -> int:
     if not live:
         append_log(
             source_label,
-            {"event": "dry_run", "text": text, "chars": len(text), "generated": is_generated, "quote_tweet_id": quote_id},
+            {"event": "dry_run", "text": text, "chars": len(text), "generated": is_generated, "quote_tweet_id": quote_id, "thread": thread, "reply_text": reply_text},
         )
         print("[dry-run] 実投稿はしませんでした。X_LIVE_POST=true で本番投稿。")
         return 0
@@ -158,6 +192,19 @@ def main() -> int:
         return 1
 
     tweet_id = result.get("data", {}).get("id")
+
+    # スレッド投稿: 本文投稿成功後、コメ欄に『続き』リプをぶら下げる。
+    # リプ投稿失敗は本文投稿を巻き戻せないため、ログだけ残して成功扱いにする。
+    reply_id: str | None = None
+    if thread and reply_text and tweet_id:
+        try:
+            reply_result = post(reply_text, in_reply_to_tweet_id=tweet_id)
+            reply_id = reply_result.get("data", {}).get("id")
+            print(f"[reply posted] https://x.com/wakana_emeta/status/{reply_id}")
+        except Exception as e:
+            append_log(source_label, {"event": "reply_post_failed", "error": str(e), "tweet_id": tweet_id})
+            print(f"[reply post failed(本文は投稿済み)] {e}", file=sys.stderr)
+
     POSTED.mkdir(exist_ok=True)
     ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     if is_generated:
@@ -168,7 +215,7 @@ def main() -> int:
         shutil.move(str(draft_path), str(POSTED / posted_name))
     (POSTED / (posted_name + ".result.json")).write_text(
         json.dumps(
-            {"tweet_id": tweet_id, "text": text, "generated": is_generated, "source": source_label, "quote_tweet_id": quote_id, "raw": result},
+            {"tweet_id": tweet_id, "text": text, "generated": is_generated, "source": source_label, "quote_tweet_id": quote_id, "thread": thread, "reply_tweet_id": reply_id, "reply_text": reply_text, "raw": result},
             ensure_ascii=False,
             indent=2,
         ),
@@ -183,6 +230,8 @@ def main() -> int:
     }
     if quote_id:
         event_payload["quote_tweet_id"] = quote_id
+    if reply_id:
+        event_payload["reply_tweet_id"] = reply_id
     append_log(posted_name, event_payload)
     print(f"[posted] https://x.com/wakana_emeta/status/{tweet_id}")
     return 0
