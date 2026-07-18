@@ -23,6 +23,7 @@ import random
 import re
 import shutil
 import sys
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -197,13 +198,20 @@ def main() -> int:
     # リプ投稿失敗は本文投稿を巻き戻せないため、ログだけ残して成功扱いにする。
     reply_id: str | None = None
     if thread and reply_text and tweet_id:
-        try:
-            reply_result = post(reply_text, in_reply_to_tweet_id=tweet_id)
-            reply_id = reply_result.get("data", {}).get("id")
-            print(f"[reply posted] https://x.com/wakana_emeta/status/{reply_id}")
-        except Exception as e:
-            append_log(source_label, {"event": "reply_post_failed", "error": str(e), "tweet_id": tweet_id})
-            print(f"[reply post failed(本文は投稿済み)] {e}", file=sys.stderr)
+        # 一時エラー(429/5xx等)で「続きはコメントに」の約束が破れないよう、少し待って再試行する
+        for attempt in range(1, 4):
+            try:
+                reply_result = post(reply_text, in_reply_to_tweet_id=tweet_id)
+                reply_id = reply_result.get("data", {}).get("id")
+                print(f"[reply posted] https://x.com/wakana_emeta/status/{reply_id}")
+                break
+            except Exception as e:
+                if attempt < 3:
+                    print(f"[reply post retry {attempt}] {e}", file=sys.stderr)
+                    time.sleep(10 * attempt)
+                    continue
+                append_log(source_label, {"event": "reply_post_failed", "error": str(e), "tweet_id": tweet_id, "reply_text": reply_text})
+                print(f"[reply post failed(本文は投稿済み)] {e}", file=sys.stderr)
 
     POSTED.mkdir(exist_ok=True)
     ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
