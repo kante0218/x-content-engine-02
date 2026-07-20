@@ -56,7 +56,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A logs/recent_themes.json drafts/posted 2>/dev/null || true
+          git add -A logs/recent_themes.json drafts/posted drafts/pending drafts/failed 2>/dev/null || true
           if ! git diff --cached --quiet; then
             git commit -m "chore: persist post state [skip ci]"
             git push
