@@ -49,7 +49,9 @@ jobs:
           SYNC_SECRET: ${{ secrets.SYNC_SECRET }}
           X_LIVE_POST: ${{ github.event.inputs.dry_run == 'true' && 'false' || 'true' }}
           X_REPLY_THREAD_RATE: ${{ vars.X_REPLY_THREAD_RATE || '0.3' }}
-        run: python scripts/pipeline.py
+        run: |
+          set -o pipefail
+          python scripts/pipeline.py 2>&1 | tee /tmp/pipeline.log
 
       - name: Persist theme rotation state
         if: always()
@@ -77,3 +79,33 @@ jobs:
               --title "🚨 auto-post failed" \
               --body "自動投稿ワークフローが失敗しました。放置すると投稿が止まります。ログ: $url"
           fi
+
+      # 実行結果をダッシュボードへ通知する。
+      # 2026-07-25〜28 は Anthropic のクレジット残高不足で生成が失敗し続けたが、
+      # ダッシュボード側からは「投稿が止まった」ことしか分からず4日間放置された。
+      # 失敗理由をそのまま送り、稼働ヘルスに出せるようにする。
+      - name: Report run result to dashboard
+        if: always()
+        env:
+          DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
+          SYNC_SECRET: ${{ secrets.SYNC_SECRET }}
+          JOB_STATUS: ${{ job.status }}
+          ACCOUNT: "wakana"
+        run: |
+          set +e
+          [ -n "$DASHBOARD_URL" ] && [ -n "$SYNC_SECRET" ] || { echo "dashboard notify skipped (secret未設定)"; exit 0; }
+          err=""
+          if [ "$JOB_STATUS" != "success" ] && [ -f /tmp/pipeline.log ]; then
+            err=$(grep -iE "error|exception|traceback" /tmp/pipeline.log | tail -3 | head -c 500)
+            [ -n "$err" ] || err=$(tail -5 /tmp/pipeline.log | head -c 500)
+          fi
+          url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          payload=$(jq -nc \
+            --arg a "$ACCOUNT" --arg r "${{ github.run_id }}" --arg s "$JOB_STATUS" \
+            --arg e "$err" --arg u "$url" --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{account:$a,runId:$r,status:$s,error:$e,runUrl:$u,startedAt:$t}')
+          curl -sS -m 20 -X POST "${DASHBOARD_URL%/}/api/pipeline" \
+            -H "content-type: application/json" \
+            -H "x-sync-secret: $SYNC_SECRET" \
+            -d "$payload" && echo "" || echo "dashboard notify failed (無視して続行)"
+          exit 0
