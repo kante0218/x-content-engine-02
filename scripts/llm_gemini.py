@@ -30,8 +30,6 @@ _ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:gen
 # モデル世代の廃止(例: 2.5-flash が新規プロジェクトで 404)に強い。
 _DEFAULT_MODEL_CHAIN = [
     "gemini-flash-latest",
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
     "gemini-flash-lite-latest",
 ]
 
@@ -95,8 +93,6 @@ class _Messages:
                 # 日本語は 1 文字あたりのトークンが多いので下限を確保
                 "maxOutputTokens": max(int(max_tokens or 2048), 2048),
                 "temperature": float(kwargs.get("temperature", 1.0)),
-                # 思考を切って本文を直接出させる(空応答防止 & 無料枠節約)
-                "thinkingConfig": {"thinkingBudget": 0},
             },
             # ペルソナ投稿が安全フィルタで誤ブロックされないよう緩める
             "safetySettings": [
@@ -173,7 +169,7 @@ class _Messages:
         if not cands:
             return ""
         parts = (cands[0].get("content") or {}).get("parts") or []
-        return "".join(p.get("text", "") for p in parts).strip()
+        return "".join(p.get("text", "") for p in parts if not p.get("thought")).strip()
 
 
 class Anthropic:

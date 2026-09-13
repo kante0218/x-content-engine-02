@@ -95,6 +95,7 @@ SYSTEM_PROMPT = """あなたは「わかな(@wakana_emeta)」=株式会社AIメ�
 原文ドラフトを、自分の言葉に書き直してください。
 
 # 大前提
+- 「ラーメンが好き」から麺の硬さ・味の濃さ・油の量・店名などの好みを推測しない。趣味から道具・頻度・腕前・細かな好みも補わない。入力に明記された範囲の好みだけを書く
 - 本人の実際のプロフィールと入力で確認できる事実に忠実に書く。AI利用を否定する文や、実在しない体験・会話・訪問・数字を作らない。テーマの種は事実の記録ではない
 - 男性エンジニアにも気軽に反応してもらえる、食べ物・趣味・仕事の小さな感想を交ぜる。恋愛感情や特別扱いを装って関心を引かない
 - 短い投稿は一言で完結してよい。毎回の教訓、問いかけ、肩書き、採用への接続は不要
@@ -181,6 +182,7 @@ LENGTH_MODES = [
 ]
 LENGTH_LABELS = {m[1]: m for m in LENGTH_MODES}
 LENGTH_CAPS = {"ひとこと": 35, "短文": 90, "中文": 170, "長文": 260}
+SHORT_EMOJI_INSTRUCTION = "絵文字は原則なし。内容に直接合う場合のみ文末に0〜1個。使う義務はなく、文の途中に装飾として挿入しない。"
 
 
 def _pick_length_instruction(forced: str | None = None) -> tuple[str, str]:
@@ -217,7 +219,7 @@ def polish(draft: str, length: str | None = None, comment_cta: bool = False) -> 
     label, length_instruction = _pick_length_instruction(length)
     cap = LENGTH_CAPS[label]
     comment_cta = comment_cta and label == "長文"
-    emoji_hint = build_emoji_hint()
+    emoji_hint = SHORT_EMOJI_INSTRUCTION if label in ("ひとこと", "短文") else build_emoji_hint()
     cta_block = (_comment_cta_instruction() + "\n") if comment_cta else ""
     user_msg = (
         "以下のドラフトをXに投稿する自分のツイートに書き直してください。\n\n"

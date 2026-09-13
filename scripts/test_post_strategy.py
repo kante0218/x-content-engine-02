@@ -55,6 +55,21 @@ def main():
     with patch.object(polish, "Anthropic", return_value=client):
         assert len(polish.polish("ラーメンが好きです。", comment_cta=True)) <= 35
     assert "今回はコメ欄" not in client.messages.create.call_args.kwargs["messages"][0]["content"]
+    assert "麺の硬さ" in polish.SYSTEM_PROMPT
+    for label in ("ひとこと", "短文"):
+        palette_function = "build_emoji_hint" if IS_WAKANA else "_emoji_instruction"
+        with patch.object(polish, "Anthropic", return_value=client), patch.object(polish, palette_function, side_effect=AssertionError("short posts must not force a palette")):
+            polish.polish("ラーメンが好きです。", length=label)
+        prompt = client.messages.create.call_args.kwargs["messages"][0]["content"]
+        assert polish.SHORT_EMOJI_INSTRUCTION in prompt
+        assert "今回の絵文字パレット" not in prompt
+        with patch.object(generate, "Anthropic", return_value=client):
+            if IS_WAKANA:
+                with patch.object(generate, "build_emoji_hint", side_effect=AssertionError("short generation must not force a palette")):
+                    generate._call("好きなもの", "既知の好みのみ", label)
+            else:
+                generate.generate("F", "日常", "既知の好みのみ", [], length=label)
+        assert polish.SHORT_EMOJI_INSTRUCTION in client.messages.create.call_args.kwargs["messages"][0]["content"]
 
     for label, cap in polish.LENGTH_CAPS.items():
         if IS_WAKANA:
@@ -77,7 +92,7 @@ def main():
                 assert rewrite.call_args.kwargs["length"] == ("ひとこと" if len(body) <= 35 else "短文")
                 assert log.call_args.args[1]["thread"] is False
                 assert pending.exists()
-    print("PASS: provider key isolation, 4 caps, retries, fixed mix, tiny preservation, no short threads, dry-run no send")
+    print("PASS: provider key isolation, 4 caps, retries, fixed mix, tiny preservation, optional short emojis, no invented subpreferences prompt, no short threads, dry-run no send")
 
 
 if __name__ == "__main__":

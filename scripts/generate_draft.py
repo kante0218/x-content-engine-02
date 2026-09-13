@@ -27,6 +27,7 @@ from polish_draft import (  # noqa: E402
     Anthropic,
     LLM_API_KEY,
     LENGTH_CAPS,
+    SHORT_EMOJI_INSTRUCTION,
     MODEL,
     SYSTEM_PROMPT,
     _pick_length_instruction,
@@ -246,8 +247,8 @@ def _call(hint: str, seed: str, length: str | None) -> str:
     api_key = LLM_API_KEY
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY または ANTHROPIC_API_KEY が未設定")
-    _, length_instruction = _pick_length_instruction(length)
-    emoji_hint = build_emoji_hint()
+    label, length_instruction = _pick_length_instruction(length)
+    emoji_hint = SHORT_EMOJI_INSTRUCTION if label in ("ひとこと", "短文") else build_emoji_hint()
     seed_block = (
         f"今日書く具体的なネタの種(この切り口・エピソードを起点に): {seed}\n"
         "このネタの種は話題案であり実体験の記録ではない。未確認の出来事や会話を本人の体験として書かない。\n\n"
@@ -278,7 +279,7 @@ def generate(length: str | None = None) -> tuple[str, str]:
     cap = LENGTH_CAPS[length]
     if length in ("ひとこと", "短文"):
         # 軽い回は採用テーマに引き戻さず、確認済みの好みだけを素材にする。
-        theme_key, hint, seed = "daily", HINTS["daily"], "プロフィールにある好きな食べ物、テニス、読書、作品のうち1つへの好み。今日の出来事は作らない"
+        theme_key, hint, seed = "daily", HINTS["daily"], "プロフィールに明記された食べ物や趣味の名前を1つ選び、その既知の好みだけを短く述べる。細かな好み・実体験・今日の出来事を追加しない"
     else:
         theme_key, hint, seed = pick_theme(_active_bank())
     for _ in range(3):
