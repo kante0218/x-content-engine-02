@@ -17,7 +17,6 @@ import random
 import sys
 from pathlib import Path
 
-from anthropic import Anthropic
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -25,7 +24,9 @@ load_dotenv(ROOT / ".env")
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from polish_draft import (  # noqa: E402
-    MAX_CHARS,
+    Anthropic,
+    LLM_API_KEY,
+    LENGTH_CAPS,
     MODEL,
     SYSTEM_PROMPT,
     _pick_length_instruction,
@@ -52,7 +53,7 @@ THEME_BANK = [
     ("learning", "学び続けること、変化を受け入れることの大切さ。AI時代を柔らかいトーンで"),
     ("daily", "日常・人間味。コーヒー、読書(詩集)、散歩、テニス、料理や美容、仙台のことなど、仕事の合間のふとした気づき。※東日本大震災には触れない"),
 ]
-THEME_WEIGHTS = {"daily": 1}  # 日常系は頻度低め
+THEME_WEIGHTS = {"daily": 12}  # 日常も選択肢として厚くする
 DEFAULT_WEIGHT = 3
 HINTS = dict(THEME_BANK)
 
@@ -242,24 +243,20 @@ def pick_theme(bank: list[tuple[str, str, float, list[str]]]) -> tuple[str, str,
 
 
 def _call(hint: str, seed: str, length: str | None) -> str:
-    api_key = os.getenv("ANTHROPIC_API_KEY")
+    api_key = LLM_API_KEY
     if not api_key:
-        raise RuntimeError("GEMINI_API_KEY が未設定(https://aistudio.google.com/apikey で無料発行)")
+        raise RuntimeError("GEMINI_API_KEY または ANTHROPIC_API_KEY が未設定")
     _, length_instruction = _pick_length_instruction(length)
     emoji_hint = build_emoji_hint()
     seed_block = (
         f"今日書く具体的なネタの種(この切り口・エピソードを起点に): {seed}\n"
-        "このネタの種は“起点”であって、そのままコピーしない。自分の体験・情景・具体を足して膨らませる。\n\n"
+        "このネタの種は話題案であり実体験の記録ではない。未確認の出来事や会話を本人の体験として書かない。\n\n"
         if seed
         else ""
     )
     user_msg = (
         "あなた(わかな)として、Xに投稿する新しいツイートを1つ書いてください。\n"
-        "過去の投稿の焼き直しにならないよう、今日ふと感じたことのように、具体的なエピソードや切り口で。\n"
-        "宣伝・募集の押し売りにはせず、自然な独り言や気づきのトーンで。\n"
-        "【最重要】1行目に一番おもしろい核心・意外な気づき・具体的な数字・短い問いを置く。"
-        "状況説明や前置き(「前職で〜していた頃」等)から始めない。冒頭280字だけ読まれても意味が通り、続きを読みたくなる形に。\n"
-        "ソフトな声色は崩さず、構造だけアルゴリズムに最適化する(システムの『バズ最適化』に従う)。\n\n"
+        "宣伝・募集を押し売りせず、本人が確認できる好みや考えを自然な言葉で。短文に教訓やエピソードを足さない。\n"
         f"テーマ: {hint}\n\n"
         f"{seed_block}"
         f"{length_instruction}\n\n"
@@ -277,13 +274,19 @@ def _call(hint: str, seed: str, length: str | None) -> str:
 
 def generate(length: str | None = None) -> tuple[str, str]:
     """(theme_key, tweet_text) を返す。上限超なら1回だけ短めで再生成。"""
-    bank = _active_bank()
-    theme_key, hint, seed = pick_theme(bank)
-    text = _call(hint, seed, length)
-    if len(text) > MAX_CHARS:
-        text = _call(hint, seed, "中文")
-    if len(text) > MAX_CHARS:
-        raise RuntimeError(f"生成結果が{len(text)}文字>{MAX_CHARS}。テーマ={theme_key}")
+    length, _ = _pick_length_instruction(length)
+    cap = LENGTH_CAPS[length]
+    if length in ("ひとこと", "短文"):
+        # 軽い回は採用テーマに引き戻さず、確認済みの好みだけを素材にする。
+        theme_key, hint, seed = "daily", HINTS["daily"], "プロフィールにある好きな食べ物、テニス、読書、作品のうち1つへの好み。今日の出来事は作らない"
+    else:
+        theme_key, hint, seed = pick_theme(_active_bank())
+    for _ in range(3):
+        text = _call(hint, seed, length)
+        if text and len(text) <= cap:
+            break
+    else:
+        raise RuntimeError(f"生成結果が空、または{cap}文字超過({len(text)}文字)。テーマ={theme_key}")
     record_used_emojis(text)
     sys.stderr.write(f"[generate theme={theme_key} seed={'y' if seed else 'n'} chars={len(text)}]\n")
     return theme_key, text

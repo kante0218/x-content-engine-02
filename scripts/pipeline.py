@@ -33,7 +33,7 @@ load_dotenv(ROOT / ".env")
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from generate_draft import generate  # noqa: E402
-from polish_draft import generate_reply, polish  # noqa: E402
+from polish_draft import _pick_length_instruction, generate_reply, polish  # noqa: E402
 from post_tweet import post  # noqa: E402
 
 
@@ -118,7 +118,8 @@ def main() -> int:
         if quote_id:
             print(f"[quote_rt] quote_tweet_id={quote_id}")
         # コメ欄に『続き』を置くスレッド投稿にするか(引用RTとは併用しない)
-        thread = (quote_id is None) and (random.random() < _reply_thread_rate())
+        length = length or ("ひとこと" if len(body.strip()) <= 35 else "短文" if len(body.strip()) <= 90 else _pick_length_instruction()[0])
+        thread = (length == "長文") and (len(body.strip()) > 170) and (quote_id is None) and (random.random() < _reply_thread_rate())
         try:
             text = polish(body, length=length, comment_cta=thread)
         except Exception as e:

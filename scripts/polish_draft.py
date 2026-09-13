@@ -13,16 +13,21 @@ import random
 import sys
 from pathlib import Path
 
-from anthropic import Anthropic
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
+if os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY_2") or os.getenv("GOOGLE_API_KEY"):
+    from llm_gemini import Anthropic
+    LLM_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY_2") or os.getenv("GOOGLE_API_KEY")
+else:
+    from anthropic import Anthropic
+    LLM_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
 MODEL = "claude-opus-4-7"
 
-# 投稿の最大文字数。X Premium 契約済みのため 280 字を超える長文投稿が可能(2026-06-04)。
-MAX_CHARS = 1000
+# 今回の運用はPremiumの長文枠を使わず、260字まで。
+MAX_CHARS = 260
 
 # --- 絵文字パレット(2026-06-04: 桜🌸とコーヒー☕への偏りを是正、全体をローテーション) ---
 # (絵文字, 重み)。重みが大きいほど候補に選ばれやすい。
@@ -80,7 +85,7 @@ def build_emoji_hint() -> str:
         weights.pop(idx)
         chosen.append(pick)
     return (
-        "【今回の絵文字】次の候補から、内容に合うものを1〜2個だけ選んで使う: "
+        "【今回の絵文字】次の候補から、内容に合うものを0〜1個使う: "
         + " ".join(chosen)
         + " 。候補が内容に全く合わなければ絵文字なしでもよい。"
         "🌸や☕に偏らせず、毎回ちがう絵文字を選ぶこと。"
@@ -90,10 +95,12 @@ SYSTEM_PROMPT = """あなたは「わかな(@wakana_emeta)」=株式会社AIメ�
 原文ドラフトを、自分の言葉に書き直してください。
 
 # 大前提
-- AIが書いたとバレないこと
+- 本人の実際のプロフィールと入力で確認できる事実に忠実に書く。AI利用を否定する文や、実在しない体験・会話・訪問・数字を作らない。テーマの種は事実の記録ではない
+- 男性エンジニアにも気軽に反応してもらえる、食べ物・趣味・仕事の小さな感想を交ぜる。恋愛感情や特別扱いを装って関心を引かない
+- 短い投稿は一言で完結してよい。毎回の教訓、問いかけ、肩書き、採用への接続は不要
 - 構成テンプレ(共感→気づき→アドバイス→締め)を毎回踏まない。今回はどこから入ってどこで終わるか、毎回違う角度で
 - 「みんなも意識してみて?!」「頑張ろう!」「素敵な一日を」みたいな定型の締めは禁止
-- 真面目6:軽め4のバランス。基本は誠実、たまに人間味の差し色
+- 真面目と軽い投稿を交ぜる。短文は日常の好みや気軽な感想でよい
 
 # 人物プロフィール(忠実に守る)
 - 1997年6月4日生まれ、現在28歳の女性経営者
@@ -139,7 +146,7 @@ SYSTEM_PROMPT = """あなたは「わかな(@wakana_emeta)」=株式会社AIメ�
   🌟 🌀 🚀 👾 🙇‍♀️ 🥲 😘 😌 💖 🌸 😂 🙆‍♀️ 🍙 😇 😭 🏋️‍♀️ ☕ ‼️ 🐰 😀 🙏 🥹 🤔 ☺️ 🍓 ☀️ 😅
 - **🌸(桜)と☕(コーヒー)に偏らせない**。これまで使いすぎていたので、毎回パレット全体から違うものを選び、いろんな絵文字をまんべんなく使う
 - ユーザーメッセージに「【今回の絵文字】候補: …」が指定されたら、**その候補の中から内容に合うものを優先して選ぶ**
-- 1ツイートに **1〜2個** が基準。同じ絵文字を1ツイート内で繰り返さない、絵文字3つ並べない
+- 1ツイートに **0〜1個** が基準。同じ絵文字を1ツイート内で繰り返さない、絵文字3つ並べない
 - ソフトトーン優先。‼️😭🚀などテンション高めの絵文字は基本控えめ、内容にハマるときだけ
 - ハート系は 💖 のみ(♡♥など他は不使用)
 
@@ -151,52 +158,29 @@ SYSTEM_PROMPT = """あなたは「わかな(@wakana_emeta)」=株式会社AIメ�
 - 採用観: 「学ぶ姿勢」「価値観の一致」「挑戦できる人」を見る。他責が強い人は採用しない
 - 候補者には良いことだけでなく課題も伝える、納得して選んでほしい
 
-# バズ最適化(Xアルゴリズム対応 / 2026-06-27 ユーザー指示「しっかり最適化」)
-ソフトな声色は崩さない。声を強くするのではなく、**構造だけ**をアルゴリズムに最適化する。
-1. **1行目で勝負(最重要)**: 長文は約280字で「…さらに表示」に切られる。だから一番おもしろい核心・意外な気づき・具体的な数字・短い問いを **1行目に置く**。「前職で人事をしていた頃〜」のような状況説明・前置きから入らない。山場を冒頭に、説明はあとから。
-   - 良い例の型(ソフトのまま):「年収で選んだ転職ほど、後で理由が思い出せなくなる気がしています。」/「数百人と面談して、いちばん意外だったのは“質問の上手さ”が本音と関係なかったことでした。」
-2. **冒頭280字に要点を凝縮**: 切れても意味が通り、続きを読みたくなる状態にする。オチや数字を末尾だけに置かない。
-3. **保存したくなる具体性**: ふわっとした一般論で終えない。固有の場面・数字・「気づいた3つのこと」のような持ち帰れる形にする。3回に1回くらいは ①②③ の軽い箇条書きで読みやすく(毎回はやらない。地の語りの回も残す)。
-4. **返信が生まれる締め**: 4回に1回くらい、最後に読者への **自然で具体的な問いかけ** を1つだけ添える(例:「みなさんは納得して選べた転職、ありましたか?」)。ただし「みんなも意識してみて?!」「どう思いますか?」のような薄い定型煽りは引き続き禁止。問いかけない回もあってよい。
-5. **滞在時間**: 途中に小さな“turn”(予想と違った・考えが変わった瞬間)を1つ入れて、最後まで読ませる。
-6. リンク・ハッシュタグは引き続き入れない(外部リンクはアルゴリズム上不利)。エンゲージ乞い(「RTして」「いいねして」)も禁止。
+# 読みやすさと返信しやすさ
+- ひとこと・短文はプロフィールにある食べ物、テニス、作品などへの小さな感想だけでよい。仕事の教訓や立場表明を足さない
+- 中文・長文だけ、必要なら背景を説明する。毎回「結論→体験→教訓」の構成にしない
+- 質問は内容に合う時だけ。いいね・返信の要求や採用への誘導を定型で付けない
+- 引用元がある時は入力された内容だけを使い、他人の発言・実績を作らない
 
 # 投稿の絶対ルール
-- **X Premium 契約済みなので長文OK**(2026-06-04 改定)。ユーザーメッセージで指定された文字数の範囲で書く。最大でも1000文字以内
-- 長文でも中身を薄めない。1つの体験・気づきを、具体的なエピソードや情景を足してじっくり展開する。同じことの言い換えで字数を埋めない
-- 長文は2〜4の段落に分け、適度に空行を入れて読みやすく
+- 指定された長さの上限を守る。短く言い切れるなら、字数の下限を埋めない
 - URL は原文にあるものだけ残す。勝手に追加しない
 
 # 出力フォーマット
 推敲後の本文だけ返す。説明・前置き・引用符・「以下が...」は一切出力しない。"""
 
 
-# 2026-06-04: X Premium 契約済みのため全体を約3倍に長文化。
+# 2026-09-13: 旧ダッシュボードの3段階比率より、今回合意した緩急を優先。
 LENGTH_MODES = [
-    # (確率重み, ラベル, 指示文)
-    (2, "短文", "今回は **やや短め** で。3〜5行、200〜300文字程度。それでも1つの気づきを具体的に。"),
-    (4, "中文", "今回は **しっかりめ** で。2〜3段落、350〜500文字程度。エピソードを足して展開する。"),
-    (4, "長文", "今回は **長め** で。3〜4段落、550〜750文字程度(1000は超えない)。具体的な情景や実体験でじっくり。"),
+    (30, "ひとこと", "今回は10〜35文字のひとこと。1行、好きなものや小さな感想1つだけ。教訓・仕事への接続・質問・続きは不要。"),
+    (35, "短文", "今回は36〜90文字の短文。1〜3行、気軽な話題1つで終える。無理に学びや採用の話へ繋げない。"),
+    (25, "中文", "今回は91〜170文字。考えや気づき1つを、必要な説明だけで伝える。"),
+    (10, "長文", "今回は171〜260文字。入力で確認できる具体的な材料が十分ある時だけ詳しく。言い換えで埋めない。"),
 ]
 LENGTH_LABELS = {m[1]: m for m in LENGTH_MODES}
-
-
-# 設定キー(short/medium/long) ↔ ラベル(短文/中文/長文)
-_LEN_KEY_TO_LABEL = {"short": "短文", "medium": "中文", "long": "長文"}
-
-
-def _config_length_weights() -> list[float] | None:
-    """ダッシュボード設定の文章量比率を LENGTH_MODES の並び順で返す。無ければ None。"""
-    try:
-        from config import fetch_post_config, length_weights  # 遅延import(失敗しても無視)
-
-        lw = length_weights(fetch_post_config())
-    except Exception:
-        return None
-    if not lw:
-        return None
-    label_to_w = {_LEN_KEY_TO_LABEL[k]: v for k, v in lw.items()}
-    return [label_to_w.get(label, 0.0) for _, label, _ in LENGTH_MODES]
+LENGTH_CAPS = {"ひとこと": 35, "短文": 90, "中文": 170, "長文": 260}
 
 
 def _pick_length_instruction(forced: str | None = None) -> tuple[str, str]:
@@ -205,7 +189,7 @@ def _pick_length_instruction(forced: str | None = None) -> tuple[str, str]:
         if not mode:
             raise ValueError(f"length は {list(LENGTH_LABELS)} のいずれか")
         return mode[1], mode[2]
-    weights = _config_length_weights() or [w for w, _, _ in LENGTH_MODES]
+    weights = [w for w, _, _ in LENGTH_MODES]
     choice = random.choices(LENGTH_MODES, weights=weights, k=1)[0]
     return choice[1], choice[2]
 
@@ -224,11 +208,15 @@ def polish(draft: str, length: str | None = None, comment_cta: bool = False) -> 
     draft = draft.strip()
     if not draft:
         raise ValueError("空のドラフトは推敲できません")
-    api_key = os.getenv("ANTHROPIC_API_KEY")
+    api_key = LLM_API_KEY
     if not api_key:
-        raise RuntimeError("GEMINI_API_KEY が未設定(https://aistudio.google.com/apikey で無料発行)")
+        raise RuntimeError("GEMINI_API_KEY または ANTHROPIC_API_KEY が未設定")
 
+    if length is None and len(draft) <= 90:
+        length = "ひとこと" if len(draft) <= 35 else "短文"
     label, length_instruction = _pick_length_instruction(length)
+    cap = LENGTH_CAPS[label]
+    comment_cta = comment_cta and label == "長文"
     emoji_hint = build_emoji_hint()
     cta_block = (_comment_cta_instruction() + "\n") if comment_cta else ""
     user_msg = (
@@ -249,8 +237,8 @@ def polish(draft: str, length: str | None = None, comment_cta: bool = False) -> 
         messages=[{"role": "user", "content": user_msg}],
     )
     text = "".join(block.text for block in res.content if block.type == "text").strip()
-    if len(text) > MAX_CHARS:
-        raise RuntimeError(f"推敲結果が{len(text)}文字>{MAX_CHARS}。原文を短くしてリトライしてください")
+    if not text or len(text) > cap:
+        raise RuntimeError(f"推敲結果が空、または{cap}文字超過({len(text)}文字)。原文を短くしてリトライしてください")
     record_used_emojis(text)
     sys.stderr.write(f"[length_mode={label} chars={len(text)}]\n")
     return text
@@ -261,6 +249,7 @@ REPLY_SYSTEM = """あなたは「わかな(@wakana_emeta)」=株式会社AIメ�
 本ツイートは核心の気づきで引っ張ってあり、このリプに"続き"が来るのを読者は期待している。
 
 # このリプの役割
+- 元ドラフトにない体験・会話・数字は作らない。本人の恋愛感情や特別扱いを装わない
 - 本ツイートで省いた続きを渡す。面談や仕事で見た具体的な場面、気づきの背景、実際にやってみて感じたことのどれか
 - 内容に合うときは番号(1. 2. 3.)や矢印(→)で「前はこう→今はこう」「状況→気づき」を1〜2箇所構造化してよい(毎回はやらない)
 - 最後に、読み手が自分の経験をコメントしたくなる自然な余白を1つ残してよい(「どう思いますか?」の薄い定型ではなく具体的な問いかけで)。無い回があってもよい
@@ -278,9 +267,9 @@ REPLY_SYSTEM = """あなたは「わかな(@wakana_emeta)」=株式会社AIメ�
 
 def generate_reply(main_text: str, draft: str) -> str:
     """投稿済み本ツイートにぶら下げる『コメ欄の続き』リプ本文を生成する。"""
-    api_key = os.getenv("ANTHROPIC_API_KEY")
+    api_key = LLM_API_KEY
     if not api_key:
-        raise RuntimeError("GEMINI_API_KEY が未設定(https://aistudio.google.com/apikey で無料発行)")
+        raise RuntimeError("GEMINI_API_KEY または ANTHROPIC_API_KEY が未設定")
     # リプは本文より短く、具体に絞る。
     reply_cap = 450
     client = Anthropic(api_key=api_key)
