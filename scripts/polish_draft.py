@@ -17,12 +17,7 @@ from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
-if os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY_2") or os.getenv("GOOGLE_API_KEY"):
-    from llm_gemini import Anthropic
-    LLM_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY_2") or os.getenv("GOOGLE_API_KEY")
-else:
-    from anthropic import Anthropic
-    LLM_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+from post_llm import Anthropic, LLM_API_KEY, LLM_PROVIDER
 
 MODEL = "claude-opus-4-7"
 
@@ -211,7 +206,7 @@ def polish(draft: str, length: str | None = None, comment_cta: bool = False) -> 
     if not draft:
         raise ValueError("空のドラフトは推敲できません")
     api_key = LLM_API_KEY
-    if not api_key:
+    if not api_key and LLM_PROVIDER != "claude_subscription":
         raise RuntimeError("GEMINI_API_KEY または ANTHROPIC_API_KEY が未設定")
 
     if length is None and len(draft) <= 90:
@@ -270,7 +265,7 @@ REPLY_SYSTEM = """あなたは「わかな(@wakana_emeta)」=株式会社AIメ�
 def generate_reply(main_text: str, draft: str) -> str:
     """投稿済み本ツイートにぶら下げる『コメ欄の続き』リプ本文を生成する。"""
     api_key = LLM_API_KEY
-    if not api_key:
+    if not api_key and LLM_PROVIDER != "claude_subscription":
         raise RuntimeError("GEMINI_API_KEY または ANTHROPIC_API_KEY が未設定")
     # リプは本文より短く、具体に絞る。
     reply_cap = 450

@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-with patch.dict(os.environ, {"GEMINI_API_KEY": "offline-gemini", "ANTHROPIC_API_KEY": "offline-anthropic"}):
+with patch.dict(os.environ, {"LLM_PROVIDER": "gemini", "GEMINI_API_KEY": "offline-gemini", "ANTHROPIC_API_KEY": "offline-anthropic"}):
     import polish_draft as polish
     import generate_draft as generate
 

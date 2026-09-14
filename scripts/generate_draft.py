@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from polish_draft import (  # noqa: E402
     Anthropic,
     LLM_API_KEY,
+    LLM_PROVIDER,
     LENGTH_CAPS,
     SHORT_EMOJI_INSTRUCTION,
     MODEL,
@@ -245,7 +246,7 @@ def pick_theme(bank: list[tuple[str, str, float, list[str]]]) -> tuple[str, str,
 
 def _call(hint: str, seed: str, length: str | None) -> str:
     api_key = LLM_API_KEY
-    if not api_key:
+    if not api_key and LLM_PROVIDER != "claude_subscription":
         raise RuntimeError("GEMINI_API_KEY または ANTHROPIC_API_KEY が未設定")
     label, length_instruction = _pick_length_instruction(length)
     emoji_hint = SHORT_EMOJI_INSTRUCTION if label in ("ひとこと", "短文") else build_emoji_hint()
